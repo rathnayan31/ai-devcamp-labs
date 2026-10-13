@@ -19,6 +19,12 @@ from typing import Any, Optional
 from google.adk.agents.callback_context import CallbackContext
 from google.adk.tools.base_tool import BaseTool
 from google.adk.tools.tool_context import ToolContext
+from google.adk.tools.load_memory_tool import load_memory_tool
+import logging
+
+from .runtime import memory_bank_enabled
+
+log = logging.getLogger(__name__)
 
 SKILLS_DIR = pathlib.Path(__file__).resolve().parents[2] / "skills"
 BUFFER_API_KEY = os.environ.get("BUFFER_API_KEY", "")
@@ -116,8 +122,10 @@ Workflow:
 )
 RemedyAgent = remedy_agent
 
-# idea -> researching -> analyzing_timing -> consulting_remedies -> drafting -> awaiting_approval -> posted
+# idea -> consulting_memory -> researching -> analyzing_timing -> consulting_remedies
+#      -> drafting -> awaiting_approval -> posted
 _TOOL_STAGES = {
+    "load_memory": "consulting_memory",
     "web_researcher": "researching",
     "dasha_timing_agent": "analyzing_timing",
     "remedy_agent": "consulting_remedies",
@@ -139,10 +147,29 @@ def _track_stage(
         tool_context.state["pipeline_stage"] = "posted"  # only a completed MCP call
     return None  # never modify the tool result
 
-def _stage_after_agent(callback_context: CallbackContext) -> None:
+_MID_PIPELINE = ("consulting_memory", "researching", "analyzing_timing", "consulting_remedies", "drafting")
+MEMORY_INGESTED_KEY = "memory_ingested"
+
+
+async def _stage_after_agent(callback_context: CallbackContext) -> None:
     # A turn that ends mid-pipeline is waiting on the user (draft approval).
-    if callback_context.state.get("pipeline_stage") in ("researching", "drafting"):
+    if callback_context.state.get("pipeline_stage") in _MID_PIPELINE:
         callback_context.state["pipeline_stage"] = "awaiting_approval"
+
+    # Lab 2: save to Memory Bank once a post is published, once per
+    # conversation. Nothing is saved automatically: the idle-session save
+    # never fires on a container that scales to zero first. Must be awaited;
+    # an un-awaited coroutine silently does nothing, and try/except won't see it.
+    if (
+        memory_bank_enabled()
+        and callback_context.state.get("pipeline_stage") == "posted"
+        and not callback_context.state.get(MEMORY_INGESTED_KEY)
+    ):
+        try:
+            await callback_context.add_session_to_memory()
+            callback_context.state[MEMORY_INGESTED_KEY] = True
+        except Exception:  # memory is an enhancement, never a gate on posting
+            log.exception("Could not save this session to Memory Bank")
 
 
 root_agent = Agent(
@@ -152,6 +179,10 @@ root_agent = Agent(
     instruction="""You help the user turn an idea into a social media post, coordinating specialist agents as needed.
 
 Workflow:
+0. If the load_memory tool is available, call it before drafting to recall
+   this user's posting style and preferences from earlier conversations
+   (tone, length, hashtags, emoji, platforms), and apply them unprompted.
+   Anything the user says in this conversation overrides a memory.
 1. If the idea needs facts, dates, or context, research it with the
    web_researcher tool first.
 2. If the user asks about astrological timing, planetary cycles, or Vimshottari
@@ -172,6 +203,8 @@ Workflow:
         skill_toolset,
         linkedin_toolset,
         buffer_toolset,
+        # Lab 2: Memory Bank only exists on Agent Runtime.
+        *([load_memory_tool] if memory_bank_enabled() else []),
     ],
     before_agent_callback=_init_stage,
     after_tool_callback=_track_stage,

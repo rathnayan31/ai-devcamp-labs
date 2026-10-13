@@ -3,6 +3,7 @@
 Run from the repo root:  uv run uvicorn backend.main:app --port 8000
 """
 
+import logging
 import pathlib
 
 from ag_ui_adk import ADKAgent, add_adk_fastapi_endpoint
@@ -15,6 +16,28 @@ load_dotenv(pathlib.Path(__file__).parent / "social_poster" / ".env")
 
 from backend.social_poster import db  # noqa: E402  (needs .env first)
 from backend.social_poster.agent import root_agent  # noqa: E402  (needs .env first)
+from backend.social_poster.runtime import resolve_agent_engine  # noqa: E402
+
+log = logging.getLogger("social_spark")
+
+# Lab 2: on Agent Runtime the container scales to zero, so conversations
+# (Sessions) and cross-conversation facts (Memory Bank) live on the engine.
+# Locally, None keeps ADKAgent's in-memory defaults.
+_engine = resolve_agent_engine()
+if _engine:
+    from google.adk.memory import VertexAiMemoryBankService
+    from google.adk.sessions import VertexAiSessionService
+
+    _engine_kwargs = {
+        "project": _engine["project"],
+        "location": _engine["location"],
+        "agent_engine_id": _engine["engine"],
+    }
+    session_service = VertexAiSessionService(**_engine_kwargs)
+    memory_service = VertexAiMemoryBankService(**_engine_kwargs)
+    log.warning("Managed Sessions + Memory Bank on engine %s (%s)", _engine["engine"], _engine["location"])
+else:
+    session_service = memory_service = None
 
 app = FastAPI(title="social-agent AG-UI backend")
 
@@ -29,6 +52,11 @@ adk_agent = ADKAgent(
     adk_agent=root_agent,
     app_name="social_poster",
     user_id="devcamp-user",  # single-user POC; extract from auth in real apps
+    session_service=session_service,
+    memory_service=memory_service,
+    # ADKAgent's idle cleanup deletes sessions by default; managed sessions
+    # must outlive this process, so only delete the local in-memory ones.
+    delete_session_on_cleanup=_engine is None,
 )
 
 add_adk_fastapi_endpoint(app, adk_agent, path="/api/adk")

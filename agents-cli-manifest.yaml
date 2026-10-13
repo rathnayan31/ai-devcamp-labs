@@ -1,0 +1,12 @@
+# agents-cli project manifest (Lab 2: Scale). Run agents-cli from the repo root.
+# Agent Runtime builds ./Dockerfile (uvicorn backend.main:app) on deploy.
+name: social-spark-poster
+agent_directory: backend/social_poster
+# Keep us-central1: Lab 3's governance policies don't exist in other regions.
+region: us-central1
+language: python
+framework: google-adk
+create_params:
+  deployment_target: agent_runtime
+  is_a2a: false
+  root_agent_name: social_poster

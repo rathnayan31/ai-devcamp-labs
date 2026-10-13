@@ -13,7 +13,9 @@
 import { useEffect, useState } from "react";
 import { useCopilotChatInternal } from "@copilotkit/react-core";
 
-const BACKEND_ORIGIN = process.env.NEXT_PUBLIC_BACKEND_ORIGIN || "http://localhost:8000";
+// Same-origin by default: /api/posts and /outputs/* are proxied to the backend
+// (app/lib/backend.ts), so this works whether the backend is local or deployed.
+const BACKEND_ORIGIN = process.env.NEXT_PUBLIC_BACKEND_ORIGIN || "";
 
 type PostEntry = {
   id: string;

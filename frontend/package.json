@@ -12,6 +12,7 @@
     "@copilotkit/react-core": "1.62.3",
     "@copilotkit/react-ui": "1.62.3",
     "@copilotkit/runtime": "1.62.3",
+    "google-auth-library": "10.9.0",
     "next": "16.2.10",
     "react": "19.2.4",
     "react-dom": "19.2.4"
